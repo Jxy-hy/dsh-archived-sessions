@@ -172,26 +172,35 @@ async function handleUnarchive(ctx: Context, sessionId: string): Promise<unknown
 async function handleDelete(ctx: Context, sessionId: string): Promise<unknown> {
   const registry = ctx.workspaceRegistry as unknown
   const archived = (ctx.workspaceRegistry.archivedSessionIds as readonly string[]).includes(sessionId)
-  const logPath = await findSessionLog(sessionId)
   // A live (attached) session counts as present even without artifacts: it
   // must still be disposed and dropped from accounting, so an already
   // file-less session left over from an earlier partial deletion can be
   // cleaned up instead of lingering in the sidebar.
   const live = (ctx.sessions as unknown as { get: (id: string) => unknown }).get(sessionId)
+  let logPath = await findSessionLog(sessionId)
   if (!archived && logPath === undefined && live === undefined) {
     return { ok: false, error: 'session-not-found', message: `no archived or stored session '${sessionId}'` }
   }
 
   // 0) Dispose the live session FIRST: detach it from the in-memory store
-  // (emitting session/disposed so persistence retires its state) while its
-  // log still exists — a retirement flush of buffered events needs the file.
-  // Without this, a previously-opened session stays listed by session.list
-  // and reappears under "Ungrouped" in the sidebar after deletion.
+  // (emitting session/disposed so persistence retires its state). Without
+  // this, a previously-opened session stays listed by session.list and
+  // reappears under "Ungrouped" in the sidebar after deletion.
   let disposed = false
   if (live !== undefined) {
     const sessions = ctx.sessions as unknown as { dispose?: (id: string) => boolean }
     if (typeof sessions.dispose === 'function') {
       disposed = sessions.dispose(sessionId)
+    }
+    // The retirement flush drains the session's write-behind buffer, so a
+    // just-created session's log may only materialize AFTER disposal (the
+    // file can lag the create RPC by up to the write-batching window). Wait
+    // for the artifact before scanning for attachments and deleting.
+    if (logPath === undefined) {
+      for (let attempt = 0; attempt < 20 && logPath === undefined; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        logPath = await findSessionLog(sessionId)
+      }
     }
   }
 
