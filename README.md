@@ -18,7 +18,15 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) we
 
 ## Installation
 
-The plugin is not published to npm yet. Install from source:
+Install from npm:
+
+```sh
+dsh plugin add dsh-archived-sessions
+```
+
+The plugin is then mounted automatically (its `dsh.bundle` patch joins the profile's bundle stack). Refresh the page (hard refresh) to load the client half, then open **Settings → Archived Sessions**.
+
+Alternatively, install from source:
 
 ```sh
 git clone https://github.com/Jxy-hy/dsh-archived-sessions.git

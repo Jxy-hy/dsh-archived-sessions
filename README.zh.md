@@ -18,7 +18,15 @@
 
 ## 安装
 
-本插件尚未发布到 npm，请从源码安装：
+从 npm 安装：
+
+```sh
+dsh plugin add dsh-archived-sessions
+```
+
+安装后插件会自动挂载（其 `dsh.bundle` patch 会加入 profile 的 bundle 栈）。刷新页面（强刷）加载客户端半，打开 **设置 → 归档会话** 即可使用。
+
+也可以从源码安装：
 
 ```sh
 git clone https://github.com/Jxy-hy/dsh-archived-sessions.git
