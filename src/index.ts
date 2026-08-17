@@ -24,11 +24,13 @@ import { dirname, join } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
+// Type-only: pulls the ctx.sessions merge (the live SessionStore).
+import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-workspace'
 
 export const name = 'dsh-archived-sessions'
-export const inject = ['webServer', 'workspaceRegistry', 'sessionPersistence']
+export const inject = ['webServer', 'workspaceRegistry', 'sessionPersistence', 'sessions']
 
 const ROUTE_PREFIX = '/__dsh-archived-sessions'
 /** Canonical attachment references appear in logs as `sha256:<64 hex>`. */
@@ -171,8 +173,26 @@ async function handleDelete(ctx: Context, sessionId: string): Promise<unknown> {
   const registry = ctx.workspaceRegistry as unknown
   const archived = (ctx.workspaceRegistry.archivedSessionIds as readonly string[]).includes(sessionId)
   const logPath = await findSessionLog(sessionId)
-  if (!archived && logPath === undefined) {
+  // A live (attached) session counts as present even without artifacts: it
+  // must still be disposed and dropped from accounting, so an already
+  // file-less session left over from an earlier partial deletion can be
+  // cleaned up instead of lingering in the sidebar.
+  const live = (ctx.sessions as unknown as { get: (id: string) => unknown }).get(sessionId)
+  if (!archived && logPath === undefined && live === undefined) {
     return { ok: false, error: 'session-not-found', message: `no archived or stored session '${sessionId}'` }
+  }
+
+  // 0) Dispose the live session FIRST: detach it from the in-memory store
+  // (emitting session/disposed so persistence retires its state) while its
+  // log still exists — a retirement flush of buffered events needs the file.
+  // Without this, a previously-opened session stays listed by session.list
+  // and reappears under "Ungrouped" in the sidebar after deletion.
+  let disposed = false
+  if (live !== undefined) {
+    const sessions = ctx.sessions as unknown as { dispose?: (id: string) => boolean }
+    if (typeof sessions.dispose === 'function') {
+      disposed = sessions.dispose(sessionId)
+    }
   }
 
   // 1) Remove on-disk artifacts: the session log directory, then every
@@ -211,7 +231,7 @@ async function handleDelete(ctx: Context, sessionId: string): Promise<unknown> {
     }
   }
   const accounting = await (registry as { deleteSession: (id: string) => Promise<unknown> }).deleteSession(sessionId)
-  return { ok: true, removedLog, removedAttachments, accounting }
+  return { ok: true, disposed, removedLog, removedAttachments, accounting }
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
