@@ -176,8 +176,17 @@ export class ArchivedSessionsController {
     } catch (error) {
       this.hooks.set({
         ...this.hooks.getSnapshot(),
-        unarchiving: new Set([...this.hooks.getSnapshot().unarchiving].filter(x => x !== id)),
         error: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      // Clear the in-flight marker on BOTH outcomes. Previously the id was
+      // only removed on the failure path, so a successful unarchive left a
+      // stale `unarchiving` entry that permanently disabled this row's
+      // unarchive AND delete buttons (both bind to `unarchiving.has(id)`)
+      // once the session reappeared in the list, e.g. after a re-archive.
+      this.hooks.set({
+        ...this.hooks.getSnapshot(),
+        unarchiving: new Set([...this.hooks.getSnapshot().unarchiving].filter(x => x !== id)),
       })
     }
   }
