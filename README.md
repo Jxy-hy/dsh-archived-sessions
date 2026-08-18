@@ -4,6 +4,10 @@ English | [中文](README.zh.md)
 
 A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) web plugin that adds an **Archived Sessions** section to the Settings page for managing archived conversations.
 
+> **Official source:** this repository is the official source of the npm package `dsh-archived-sessions` — `dsh plugin add dsh-archived-sessions` installs exactly this code.
+
+![Archived Sessions in Settings](assets/screenshot.png)
+
 ## Features
 
 - **List archived sessions** — each row shows the session's own name (the same title the sidebar uses), working directory, log size, and last update time.

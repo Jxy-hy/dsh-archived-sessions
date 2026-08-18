@@ -4,6 +4,10 @@
 
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）Web 插件：在**设置（Settings）**页面新增"归档会话"分区，用于集中管理已归档的对话。
 
+> **官方来源：** 本仓库是 npm 包 `dsh-archived-sessions` 的官方来源——`dsh plugin add dsh-archived-sessions` 安装的正是本仓库的代码。
+
+![设置中的归档会话](assets/screenshot.png)
+
 ## 功能
 
 - **列出归档会话**：每行显示会话自身的名称（与侧边栏一致的标题）、工作目录、日志大小与最近更新时间。
