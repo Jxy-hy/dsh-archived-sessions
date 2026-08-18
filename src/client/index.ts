@@ -8,7 +8,7 @@
 import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 // Type-only: pulls the settings shell's SlotMap merge (the 'settings.section' entry).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import { type ClientContext, type SessionRuntime } from '@deepseek-ai/dsh-client-runtime/client'
 import { ArchivedSessionsSection } from './ArchivedSessionsSection.tsx'
 import type { ArchivedSessionsSectionInjected } from './ArchivedSessionsSection.tsx'
 import { ArchivedSessionsController } from './section-store.ts'
@@ -19,15 +19,23 @@ export type { ArchivedSessionsSectionInjected, ArchivedSessionsSectionProps } fr
 export type { ArchivedRow, ArchivedSessionsState } from './section-store.ts'
 
 /** Required services (cordis fiber inject). */
-export const inject = ['slots', 'connection']
+export const inject = ['slots', 'connection', 'sessions']
 
 /**
  * Mount the settings section.
  * @param ctx - the browser plugin context.
  */
 export function apply(ctx: ClientContext): void {
-  const { api } = ctx.get('connection') as ConnectionHandle
-  const section = new ArchivedSessionsController({ api })
+  const connection = ctx.get('connection') as ConnectionHandle
+  // The client runtime provides the concrete SessionRuntime under 'sessions'
+  // (its Context augmentation is narrow ISessions, and the stack also hosts a
+  // SessionStore by that name on the host plane), so the refresh face is
+  // reached through the concrete type.
+  const sessions = ctx.get('sessions') as unknown as SessionRuntime
+  const section = new ArchivedSessionsController({
+    api: connection.api,
+    refreshSessionList: () => sessions.refresh(),
+  })
 
   const sectionInjected = (): ArchivedSessionsSectionInjected => ({
     hooks: {

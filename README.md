@@ -59,8 +59,8 @@ The host half hot-mounts through the profile's config HMR; refresh the page (har
 
 ## Architecture
 
-- **Host half** (`src/index.ts`) — registers `GET/POST /__dsh-archived-sessions/{list,unarchive,delete}` on the shared web server. The delete flow: remove the session log directory → parse attachment references (`sha256:`) from the log → delete only the objects no other remaining session references → drop workspace accounting via `WorkspaceRegistry.deleteSession`.
-- **Client half** (`src/client/`) — registers the `settings.section` entry "Archived Sessions"; the list merges `session.list` (including the projection title) with the plugin's host surface (creation time, log size); both mutations go through the host surface because the core RPC map offers neither operation.
+- **Host half** (`src/index.ts`) — registers `GET/POST /__dsh-archived-sessions/{list,unarchive,delete}` on the shared web server. The delete flow: dispose the live session first if it is open (so the in-memory store drops it and persistence retires its state) → wait for the write-behind flush to materialize the log → remove the session log directory → parse attachment references (`sha256:`) from the log → delete only the objects no other remaining session references → drop workspace accounting via `WorkspaceRegistry.deleteSession`.
+- **Client half** (`src/client/`) — registers the `settings.section` entry "Archived Sessions"; the list merges `session.list` (including the projection title) with the plugin's host surface (creation time, log size); both mutations go through the host surface because the core RPC map offers neither operation. After a successful delete the client re-pulls the `session.list` baseline: deleting a cold (persisted, not-open) session emits no `session/disposed`, so the sidebar would otherwise keep the stale row under **Ungrouped** until the next reconnect.
 
 ## Community & Support
 

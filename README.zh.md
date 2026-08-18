@@ -59,8 +59,8 @@ Host 半会通过 profile 的配置 HMR 热挂载；刷新页面（强刷）加�
 
 ## 架构
 
-- **Host 半**（`src/index.ts`）：在共享 Web 服务上注册 `GET/POST /__dsh-archived-sessions/{list,unarchive,delete}`。删除流程：删除会话日志目录 → 解析日志中的附件引用（`sha256:`）→ 仅删除不再被任何其他会话引用的附件对象 → 通过 `WorkspaceRegistry.deleteSession` 清理工作区记账。
-- **Client 半**（`src/client/`）：注册 `settings.section` 分区"归档会话"；列表数据合并 `session.list`（含投影标题）与插件 host 接口（创建时间、日志大小）；两种变更操作都走插件 host 接口，因为核心 RPC 面不提供这两个操作。
+- **Host 半**（`src/index.ts`）：在共享 Web 服务上注册 `GET/POST /__dsh-archived-sessions/{list,unarchive,delete}`。删除流程：若会话处于打开状态则先 dispose 活动会话（让内存 store 移除它、持久化层退役其状态）→ 等待 write-behind flush 落盘日志 → 删除会话日志目录 → 解析日志中的附件引用（`sha256:`）→ 仅删除不再被任何其他会话引用的附件对象 → 通过 `WorkspaceRegistry.deleteSession` 清理工作区记账。
+- **Client 半**（`src/client/`）：注册 `settings.section` 分区"归档会话"；列表数据合并 `session.list`（含投影标题）与插件 host 接口（创建时间、日志大小）；两种变更操作都走插件 host 接口，因为核心 RPC 面不提供这两个操作。删除成功后，client 会重新拉取 `session.list` 基线：删除**冷会话**（已持久化、当前未打开）不会触发 `session/disposed`，否则侧边栏会把这个残留行一直显示在**未分组**下，直到下次重连。
 
 ## 社区与支持
 

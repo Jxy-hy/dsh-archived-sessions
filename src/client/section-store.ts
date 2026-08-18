@@ -14,7 +14,16 @@ import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 
 /** The slice of the connection the controller needs. */
-export type ArchivedSessionsConnection = Pick<ConnectionHandle, 'api'>
+export type ArchivedSessionsConnection = Pick<ConnectionHandle, 'api'> & {
+  /**
+   * Re-pull the Host session-list baseline after a delete. Deleting a cold
+   * (persisted, not-open) session never fires `session/disposed`, so the
+   * browser never receives `host/session-removed` for it; dropping it from
+   * the archive set merely un-hides the stale row as Ungrouped. Refreshing
+   * prunes rows absent from the fresh baseline.
+   */
+  refreshSessionList: () => Promise<void>
+}
 
 /** One archived-session row the page renders. */
 export interface ArchivedRow {
@@ -206,6 +215,9 @@ export class ArchivedSessionsController {
       if (!result.ok) throw new Error(result.message ?? result.error ?? 'delete failed')
       this.hooks.set({ ...this.hooks.getSnapshot(), deleting: false, pendingDelete: null })
       await this.load()
+      // The deleted cold session cannot have fired a session-removed frame,
+      // so re-pull the Host session list to drop its stale Ungrouped row.
+      await this.connection.refreshSessionList()
     } catch (error) {
       this.hooks.set({
         ...this.hooks.getSnapshot(),
