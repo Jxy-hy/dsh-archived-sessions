@@ -3,3 +3,5 @@ lib/
 *.tsbuildinfo
 *.log
 .DS_Store
+# Auth tokens live here when publishing; never commit them.
+.npmrc
