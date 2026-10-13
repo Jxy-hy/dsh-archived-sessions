@@ -21,6 +21,7 @@ const PLUGIN_ID = 'dsh-archived-sessions'
 /** Browser platform modules shared by the web shell's frozen module table (externals). */
 const PLATFORM_MODULES = [
   'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis',
+  '@deepseek-ai/dsh-client-store',
   '@deepseek-ai/dsh-client-ui-slots',
   '@deepseek-ai/dsh-client-web-react',
   '@deepseek-ai/dsh-client-ui-primitives',
@@ -28,11 +29,12 @@ const PLATFORM_MODULES = [
   '@deepseek-ai/dsh-client-schema-form',
 ] as const
 
-/** The one documented non-platform runtime export client bundles may consume. */
-const RUNTIME_STORE_EXEMPTION = '@deepseek-ai/dsh-client-runtime/client'
+// The snapshot-store engine (@deepseek-ai/dsh-client-store) replaced the former
+// dsh-client-runtime bundle: it is now a platform seed word, so the shell's
+// module table answers it (same treatment as ui-agent-preset).
 
 /** Every specifier the shell's module table can answer; anything else must inline. */
-const EXTERNALS: readonly string[] = [...PLATFORM_MODULES, RUNTIME_STORE_EXEMPTION]
+const EXTERNALS: readonly string[] = [...PLATFORM_MODULES]
 
 /** Virtual-id wrapper keeping module CSS away from tsdown's own css pipeline. */
 const CSS_VIRTUAL_PREFIX = '\0dsh-css:'

@@ -10,11 +10,26 @@
  * RPC map has no unarchive/delete methods.
  */
 
-import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
-import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 
-/** The slice of the connection the controller needs. */
-export type ArchivedSessionsConnection = Pick<ConnectionHandle, 'api'> & {
+/**
+ * The wire faces the controller needs, narrowed from the current harness
+ * services (the generated Remote namespace for session listing and the live
+ * workspace snapshot for the archive set — the former `connection.api`
+ * surface no longer exists).
+ */
+export interface ArchivedSessionsConnection {
+  /** Session listing remote namespace. */
+  sessions: {
+    list(request: unknown): Promise<
+      | { ok: true; value: { items: readonly SessionListWireRow[] } }
+      | { ok: false; error: { message: string } }
+    >
+  }
+  /** Live workspace snapshot carrying the registry-global archive set. */
+  workspaces: {
+    list: { getSnapshot(): { archivedSessionIds: readonly string[] } }
+  }
   /**
    * Re-pull the Host session-list baseline after a delete. Deleting a cold
    * (persisted, not-open) session never fires `session/disposed`, so the
@@ -124,18 +139,17 @@ export class ArchivedSessionsController {
     if (snapshot.status === 'loading') return
     this.hooks.set({ ...snapshot, status: 'loading', error: null })
     try {
-      const [sessionResult, workspaceResult, hostResult] = await Promise.all([
-        this.connection.api.sessions.list({}),
-        this.connection.api.workspace.list({}),
+      const [sessionResult, hostResult] = await Promise.all([
+        this.connection.sessions.list({}),
         this.fetchHost<{ ok: boolean; rows?: HostListWireRow[] }>('/__dsh-archived-sessions/list'),
       ])
-      if (!sessionResult.result.ok || !workspaceResult.result.ok) {
-        throw new Error('session/workspace listing failed')
+      if (!sessionResult.ok) {
+        throw new Error('session listing failed')
       }
       const archivedIds = new Set<string>(
-        workspaceResult.result.value.archivedSessionIds as unknown as string[])
+        this.connection.workspaces.list.getSnapshot().archivedSessionIds as unknown as string[])
       const byId = new Map<string, SessionListWireRow>()
-      for (const item of sessionResult.result.value.items) {
+      for (const item of sessionResult.value.items) {
         byId.set(item.sessionId, item as unknown as SessionListWireRow)
       }
       const hostById = new Map<string, HostListWireRow>()

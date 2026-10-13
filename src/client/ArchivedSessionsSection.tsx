@@ -9,9 +9,9 @@
 import { useEffect } from 'react'
 import type { ReactNode } from 'react'
 import {
-  Button, IconRefreshOutline16, IconTrashOutline16, Modal, Tooltip,
+  Button, IconTrashOutlineRegular, IconUnarchiveOutlineRegular, Modal, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ArchivedRow, ArchivedSessionsState } from './section-store.ts'
 import { t } from './locales.ts'
@@ -116,7 +116,7 @@ export function ArchivedSessionsSection(props: ArchivedSessionsSectionProps): Re
                       disabled={busy}
                       onClick={() => { void props.unarchive(row.id) }}
                     >
-                      <IconRefreshOutline16 size={16} />
+                      <IconUnarchiveOutlineRegular size={16} />
                       <span className={css.actionLabel}>
                         {busy ? t('unarchiving') : t('unarchive')}
                       </span>
@@ -130,7 +130,7 @@ export function ArchivedSessionsSection(props: ArchivedSessionsSectionProps): Re
                       disabled={busy}
                       onClick={() => { props.confirmDelete(row) }}
                     >
-                      <IconTrashOutline16 size={16} />
+                      <IconTrashOutlineRegular size={16} />
                       <span className={css.actionLabel}>{t('delete')}</span>
                     </button>
                   </Tooltip>

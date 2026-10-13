@@ -17,8 +17,10 @@
 
 ## 前置要求
 
-- 具备工作区**归档**功能的 DeepSeek Harness（`archivedSessionIds` / `archiveSession` 接口）。
-- 完整的取消归档/删除记账功能需要核心中的 `WorkspaceRegistry.unarchiveSession` / `deleteSession` 方法。在发布版核心提供之前，插件会优雅降级：仍可列出归档会话并删除磁盘文件，取消归档会给出明确的"重启 `dsh web`"提示。
+- DeepSeek Harness **0.2.0-rc.2 或更新版本**——插件依赖 `@deepseek-ai/dsh-client-store` 快照 store，以及 `remote.session` / `workspaces` 客户端服务；它们取代了早期的 `dsh-client-runtime` / `connection.api` 接口。
+- 核心需具备工作区**归档**接口（`workspaceRegistry.archivedSessionIds` / `unarchiveSession`）。
+- **删除功能不需要核心额外支持**。它通过已有的 `unarchiveSession` 清理归档集合，而该方法的契约恰好就是删除所需的：把 id 从 `archivedSessionIds` 摘掉、不碰任何记账槽位、不做会话存在性检查、对未归档的 id 直接 no-op。工作区 `sessionIds` 同样无需写入——该 getter 本身就按 canonical-cwd 头索引过滤，日志一删，会话自动从工作区投影中掉出去。
+- 若核心早于归档接口，插件会优雅降级而非报错：列表仍可用，缺失的能力以结构化的 `partial` 结果返回，而不是抛出异常。
 
 ## 安装
 
@@ -59,8 +61,19 @@ Host 半会通过 profile 的配置 HMR 热挂载；刷新页面（强刷）加�
 
 ## 架构
 
-- **Host 半**（`src/index.ts`）：在共享 Web 服务上注册 `GET/POST /__dsh-archived-sessions/{list,unarchive,delete}`。删除流程：若会话处于打开状态则先 dispose 活动会话（让内存 store 移除它、持久化层退役其状态）→ 等待 write-behind flush 落盘日志 → 删除会话日志目录 → 解析日志中的附件引用（`sha256:`）→ 仅删除不再被任何其他会话引用的附件对象 → 通过 `WorkspaceRegistry.deleteSession` 清理工作区记账。
-- **Client 半**（`src/client/`）：注册 `settings.section` 分区"归档会话"；列表数据合并 `session.list`（含投影标题）与插件 host 接口（创建时间、日志大小）；两种变更操作都走插件 host 接口，因为核心 RPC 面不提供这两个操作。删除成功后，client 会重新拉取 `session.list` 基线：删除**冷会话**（已持久化、当前未打开）不会触发 `session/disposed`，否则侧边栏会把这个残留行一直显示在**未分组**下，直到下次重连。
+- **Host 半**（`src/index.ts`）：在共享 Web 服务上注册 `GET/POST /__dsh-archived-sessions/{list,unarchive,delete}`。删除流程：若会话处于打开状态则先 dispose 活动会话（让内存 store 移除它、持久化层退役其状态）→ 等待 write-behind flush 落盘日志 → 删除会话日志目录 → 解析日志中的附件引用（`sha256:`）→ 仅删除不再被任何其他会话引用的附件对象 → 通过 `workspaceRegistry.unarchiveSession` 清理归档集合。
+- **Client 半**（`src/client/`）：注册 `settings.section` 分区"归档会话"；列表数据合并 `remote.session` 列表（含投影标题）与插件 host 接口（创建时间、日志大小）；两种变更操作都走插件 host 接口，因为核心 RPC 面不提供这两个操作。删除成功后，client 会重新拉取会话列表基线：删除**冷会话**（已持久化、当前未打开）不会触发 `session/disposed`，否则侧边栏会把这个残留行一直显示在**未分组**下，直到下次重连。
+
+## 验证
+
+本仓库没有测试框架；两个检查都是针对**已构建产物**的独立 Node 脚本，因此请先执行 `pnpm run build`。
+
+```sh
+pnpm run verify
+```
+
+- `verify:delete`：把 `DSH_HOME` 指向一次性目录，通过真实 HTTP socket 驱动 `lib/index.js`：列表返回带日志信息的行；删除会移除日志目录、只回收不再被任何存活会话引用的附件对象（共享对象必须保留）、清空归档集合，并返回完整成功；核心缺少 `unarchiveSession` 时降级为 `partial` 而非抛错。
+- `verify:client`：用壳的冻结模块表桩执行 `lib/client.js`，然后挂载并渲染该分区。它专门捕捉曾经导致设置页白屏的那类故障：壳未导出的具名导入（例如已被移除的 `IconTrashOutline16`）会解析为 `undefined`，只在**渲染**时才抛错，而异常被插槽的错误边界吞掉，于是页面呈现为空白而不是响亮地失败。bundle 导入的每个名字都必须是壳 primitives 的真实导出。
 
 ## 社区与支持
 

@@ -17,8 +17,10 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) we
 
 ## Requirements
 
-- DeepSeek Harness with the workspace **archive** feature (the `archivedSessionIds`/`archiveSession` surface).
-- Full unarchive/delete functionality requires the core `WorkspaceRegistry.unarchiveSession` / `deleteSession` methods. Until they ship in a released core, the plugin degrades gracefully: it still lists archived sessions and can still remove on-disk files, while unarchive reports a clear "restart `dsh web`" hint.
+- DeepSeek Harness **0.2.0-rc.2 or newer** — the plugin consumes the `@deepseek-ai/dsh-client-store` snapshot store and the `remote.session` / `workspaces` client services, which replaced the former `dsh-client-runtime` / `connection.api` surfaces.
+- A core with the workspace **archive** surface (`workspaceRegistry.archivedSessionIds` / `unarchiveSession`).
+- Deletion needs **no extra core support**. It clears the archive set through the existing `unarchiveSession`, whose contract is exactly what a delete needs: it drops the id from `archivedSessionIds`, touches no accounting slot, runs no session-existence check, and no-ops on an id that is not archived. Workspace `sessionIds` need no write either — that getter is already filtered by the canonical-cwd header index, so removing the log drops the session from the workspace projection by itself.
+- A core older than the archive surface still degrades gracefully instead of failing: listing works, and the missing capability is reported as a structured `partial` result rather than thrown.
 
 ## Installation
 
@@ -59,8 +61,19 @@ The host half hot-mounts through the profile's config HMR; refresh the page (har
 
 ## Architecture
 
-- **Host half** (`src/index.ts`) — registers `GET/POST /__dsh-archived-sessions/{list,unarchive,delete}` on the shared web server. The delete flow: dispose the live session first if it is open (so the in-memory store drops it and persistence retires its state) → wait for the write-behind flush to materialize the log → remove the session log directory → parse attachment references (`sha256:`) from the log → delete only the objects no other remaining session references → drop workspace accounting via `WorkspaceRegistry.deleteSession`.
-- **Client half** (`src/client/`) — registers the `settings.section` entry "Archived Sessions"; the list merges `session.list` (including the projection title) with the plugin's host surface (creation time, log size); both mutations go through the host surface because the core RPC map offers neither operation. After a successful delete the client re-pulls the `session.list` baseline: deleting a cold (persisted, not-open) session emits no `session/disposed`, so the sidebar would otherwise keep the stale row under **Ungrouped** until the next reconnect.
+- **Host half** (`src/index.ts`) — registers `GET/POST /__dsh-archived-sessions/{list,unarchive,delete}` on the shared web server. The delete flow: dispose the live session first if it is open (so the in-memory store drops it and persistence retires its state) → wait for the write-behind flush to materialize the log → remove the session log directory → parse attachment references (`sha256:`) from the log → delete only the objects no other remaining session references → clear the archive set via `workspaceRegistry.unarchiveSession`.
+- **Client half** (`src/client/`) — registers the `settings.section` entry "Archived Sessions"; the list merges the `remote.session` listing (including the projection title) with the plugin's host surface (creation time, log size); both mutations go through the host surface because the core RPC map offers neither operation. After a successful delete the client re-pulls the session-list baseline: deleting a cold (persisted, not-open) session emits no `session/disposed`, so the sidebar would otherwise keep the stale row under **Ungrouped** until the next reconnect.
+
+## Verification
+
+There is no test runner in this repo; both checks are standalone Node scripts over the **built** artifacts, so run `pnpm run build` first.
+
+```sh
+pnpm run verify
+```
+
+- `verify:delete` — points `DSH_HOME` at a throwaway tree and drives `lib/index.js` over a real HTTP socket: list reports rows with log facts; delete removes the log directory, GCs only the attachment objects no surviving session references (a shared object must survive), clears the archive set, and reports a complete result; a core lacking `unarchiveSession` degrades to `partial` instead of throwing.
+- `verify:client` — executes `lib/client.js` against stubs for the shell's frozen module table, then mounts and renders the section. This catches the failure mode that once shipped a blank settings page: a named import the shell does not export (e.g. the removed `IconTrashOutline16`) resolves to `undefined` and only throws at **render** time, inside the slot's error boundary, so the page renders empty instead of failing loudly. Every name the bundle imports must be a real export of the shell's primitives.
 
 ## Community & Support
 

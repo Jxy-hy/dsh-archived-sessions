@@ -54,23 +54,42 @@ function isLogName(name: string): boolean {
 }
 
 /**
- * Locate one session's log artifact under the sessions root. The layout is
- * `<root>/<workspace-segment>/<sessionId>/session.jsonl[.zstd]`.
+ * Session-format generation of one log artifact name: `session.jsonl[.zstd]`
+ * is generation 0, `session.vN.jsonl[.zstd]` is generation N. JSONL
+ * persistence publishes every format migration as its own immutable file, so a
+ * migrated session keeps its original generation beside the successor.
+ */
+function logGeneration(fileName: string): number {
+  const match = /^session(?:\.v(\d+))?\.jsonl(?:\.zstd)?$/.exec(fileName)
+  const version = match?.[1]
+  return version === undefined ? 0 : Number(version)
+}
+
+/**
+ * Locate one session's newest log artifact under the sessions root. The layout
+ * is `<root>/<workspace-segment>/<sessionId>/<generation file>`; the highest
+ * generation carries the session's current events, and the enclosing directory
+ * holds every retained generation.
  */
 async function findSessionLog(sessionId: string): Promise<string | undefined> {
-  let entries: string[]
+  const candidates: { path: string; generation: number }[] = []
   try {
-    entries = await readdir(sessionsRoot(), { recursive: true })
+    const entries = await readdir(sessionsRoot(), { recursive: true })
+    for (const entry of entries) {
+      if (!isLogName(entry)) continue
+      const parts = entry.split(/[\\/]+/)
+      if (parts.length < 2 || parts[parts.length - 2] !== sessionId) continue
+      candidates.push({
+        path: join(sessionsRoot(), entry),
+        generation: logGeneration(parts[parts.length - 1] ?? ''),
+      })
+    }
   } catch {
     return undefined
   }
-  for (const entry of entries) {
-    if (!isLogName(entry)) continue
-    const parts = entry.split(/[\\/]+/)
-    if (parts.length < 2 || parts[parts.length - 2] !== sessionId) continue
-    return join(sessionsRoot(), entry)
-  }
-  return undefined
+  candidates.sort((left, right) =>
+    right.generation - left.generation || left.path.localeCompare(right.path))
+  return candidates[0]?.path
 }
 
 /** Decode a log artifact to plaintext; a torn or incompatible artifact yields undefined. */
@@ -123,6 +142,34 @@ async function referencedElsewhere(sha256: string, exceptSessionId: string): Pro
   return false
 }
 
+/** Session facts this surface reads out of a persistence listing. */
+interface SessionHeaderFacts {
+  id: string
+  cwd?: string
+  createdAt?: number
+}
+
+/**
+ * Normalize one `sessionPersistence.list()` row to the header facts this
+ * surface needs. Session-format V3 (harness 0.1.5) returns
+ * `SessionPersistenceSnapshot` objects — `{ header, revision, … }` — while
+ * earlier builds returned the bare header, so both generations are accepted
+ * and a row carrying neither shape is dropped.
+ */
+function headerFactsOf(row: unknown): SessionHeaderFacts | undefined {
+  if (row === null || typeof row !== 'object') return undefined
+  const record = row as { header?: unknown }
+  const source = (record.header !== null && typeof record.header === 'object'
+    ? record.header
+    : record) as { id?: unknown; cwd?: unknown; createdAt?: unknown }
+  if (typeof source.id !== 'string') return undefined
+  return {
+    id: source.id,
+    ...(typeof source.cwd === 'string' ? { cwd: source.cwd } : {}),
+    ...(typeof source.createdAt === 'number' ? { createdAt: source.createdAt } : {}),
+  }
+}
+
 /** Whether the running registry build offers the extended accounting methods. */
 function coreMethodsPresent(registry: unknown, method: string): boolean {
   return typeof (registry as Record<string, unknown> | null)?.[method] === 'function'
@@ -130,11 +177,10 @@ function coreMethodsPresent(registry: unknown, method: string): boolean {
 
 async function handleList(ctx: Context): Promise<unknown> {
   const ids = ctx.workspaceRegistry.archivedSessionIds
-  let headers: readonly { id: string; cwd?: string; createdAt?: number }[] = []
+  let headers: readonly SessionHeaderFacts[] = []
   try {
-    headers = await ctx.sessionPersistence.list() as unknown as readonly {
-      id: string; cwd?: string; createdAt?: number
-    }[]
+    const listed = await ctx.sessionPersistence.list() as unknown as readonly unknown[]
+    headers = listed.map(headerFactsOf).filter((row): row is SessionHeaderFacts => row !== undefined)
   } catch {
     // Persistence listing is advisory; the archive set itself still answers.
   }
@@ -228,19 +274,33 @@ async function handleDelete(ctx: Context, sessionId: string): Promise<unknown> {
     }
   }
 
-  // 2) Drop workspace accounting (archive set + owning workspace sessionIds).
-  if (!coreMethodsPresent(registry, 'deleteSession')) {
+  // 2) Drop the workspace accounting. The owning workspace's `sessionIds`
+  // needed no explicit write even before this: its getter is already filtered
+  // by the startup/live canonical-cwd header index, so removing the log drops
+  // the session from the workspace projection by itself. What genuinely had to
+  // be cleared is the registry-global archive set, and `unarchiveSession` is
+  // exactly that write: it drops the id from `archivedSessionIds` and touches
+  // no accounting slot. It runs no session-existence check (removing an id
+  // cannot introduce an unknown one) and no-ops on an id that is not archived,
+  // so an already-clean session still resolves.
+  if (!coreMethodsPresent(registry, 'unarchiveSession')) {
     return {
       ok: true,
       partial: true,
       reason: 'accounting-core-missing',
-      message: 'files removed, but registry accounting needs a `dsh web` restart to pick up the new core',
+      message: 'files removed, but clearing the archive set needs a core that provides workspaceRegistry.unarchiveSession',
       removedLog,
       removedAttachments,
     }
   }
-  const accounting = await (registry as { deleteSession: (id: string) => Promise<unknown> }).deleteSession(sessionId)
-  return { ok: true, disposed, removedLog, removedAttachments, accounting }
+  await (registry as { unarchiveSession: (id: string) => Promise<void> }).unarchiveSession(sessionId)
+  return {
+    ok: true,
+    disposed,
+    removedLog,
+    removedAttachments,
+    accounting: 'unarchiveSession',
+  }
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
