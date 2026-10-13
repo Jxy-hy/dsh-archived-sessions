@@ -24,7 +24,8 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "rootDir": "src",
-    "outDir": "lib/types"
+    "outDir": "lib/types",
+    "tsBuildInfoFile": "./tsconfig.tsbuildinfo"
   },
   "include": [
     "src"

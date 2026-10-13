@@ -1,0 +1,6 @@
+# npm includes everything listed in package.json "files", and lib/ is one entry
+# there because the built halves must ship. Exclude the build cache that lives
+# alongside them: tsconfig.tsbuildinfo is incremental-compile state, ~120 KB,
+# and useless to anyone installing the package.
+lib/**/*.tsbuildinfo
+lib/*.tsbuildinfo
