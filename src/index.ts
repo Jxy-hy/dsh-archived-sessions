@@ -45,6 +45,38 @@ function sessionsRoot(): string {
   return join(dshHome(), 'sessions')
 }
 
+/**
+ * One session's persisted projection-cache row. The session listing serves its
+ * projection column from these rows (keyed by the bare session id), so a row
+ * left behind after the log is gone keeps the session listed forever — and
+ * because delete also clears the archive set, the survivor reappears as an
+ * ordinary unarchived conversation instead of vanishing.
+ */
+function projectionCachePath(sessionId: string): string {
+  return join(dshHome(), 'storages', 'session_projcache', 'sessions', `${sessionId}.json`)
+}
+
+/**
+ * Remove a session's projection-cache row. The row is pure derived state — a
+ * checkpoint rebuilt from the log on the next cold read — so dropping it is
+ * always safe, and it is the only way to forget a session the core no longer
+ * has a log for: `sessionProjectionCache` exposes writes and reads but no
+ * removal, and its `session/disposed` handler only flushes.
+ * @param sessionId - session whose cached row is dropped.
+ * @returns the removed path when a row existed.
+ */
+async function dropProjectionCache(sessionId: string): Promise<string | undefined> {
+  const path = projectionCachePath(sessionId)
+  try {
+    await rm(path, { force: true })
+  } catch {
+    // A missing or unreadable row is not a reason to fail the deletion; the
+    // log is already gone, so the row would be rebuilt as empty at worst.
+    return undefined
+  }
+  return path
+}
+
 function attachmentObjectPath(sha256: string): string {
   return join(dshHome(), 'attachments', 'v1', 'objects', sha256.slice(0, 2), sha256)
 }
@@ -274,7 +306,15 @@ async function handleDelete(ctx: Context, sessionId: string): Promise<unknown> {
     }
   }
 
-  // 2) Drop the workspace accounting. The owning workspace's `sessionIds`
+  // 2) Drop the persisted projection-cache row. The session listing builds its
+  // projection column from these rows, so a surviving row keeps the session
+  // listed even though its log is gone. Drop it BEFORE clearing the archive
+  // set: otherwise the row stays visible and, with the archive bit already
+  // cleared, surfaces as an ordinary unarchived conversation — the exact
+  // "delete leaves it in the sidebar, no longer archived" failure.
+  const removedCache = await dropProjectionCache(sessionId)
+
+  // 3) Drop the workspace accounting. The owning workspace's `sessionIds`
   // needed no explicit write even before this: its getter is already filtered
   // by the startup/live canonical-cwd header index, so removing the log drops
   // the session from the workspace projection by itself. What genuinely had to
@@ -290,6 +330,7 @@ async function handleDelete(ctx: Context, sessionId: string): Promise<unknown> {
       reason: 'accounting-core-missing',
       message: 'files removed, but clearing the archive set needs a core that provides workspaceRegistry.unarchiveSession',
       removedLog,
+      removedCache,
       removedAttachments,
     }
   }
@@ -298,6 +339,7 @@ async function handleDelete(ctx: Context, sessionId: string): Promise<unknown> {
     ok: true,
     disposed,
     removedLog,
+    removedCache,
     removedAttachments,
     accounting: 'unarchiveSession',
   }

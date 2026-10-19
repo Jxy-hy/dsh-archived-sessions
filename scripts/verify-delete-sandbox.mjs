@@ -23,6 +23,7 @@ process.env.DSH_HOME = SANDBOX
 
 const SESSIONS = join(SANDBOX, 'sessions', '--sandbox--')
 const OBJECTS = join(SANDBOX, 'attachments', 'v1', 'objects')
+const CACHE_DIR = join(SANDBOX, 'storages', 'session_projcache', 'sessions')
 
 /** sha256-shaped ids; the plugin only regex-matches the shape. */
 const SHARED = 'aa'.repeat(32)
@@ -33,6 +34,10 @@ const keeper = 'session-keeper-0002'
 
 function objectPath(sha) {
   return join(OBJECTS, sha.slice(0, 2), sha)
+}
+
+function cachePath(id) {
+  return join(CACHE_DIR, `${id}.json`)
 }
 
 function seed() {
@@ -52,6 +57,12 @@ function seed() {
   for (const sha of [SHARED, ORPHAN]) {
     mkdirSync(join(OBJECTS, sha.slice(0, 2)), { recursive: true })
     writeFileSync(objectPath(sha), `object ${sha}`)
+  }
+  // Persisted projection-cache rows: the listing serves its projection column
+  // from these, so a surviving row keeps a deleted session listed.
+  mkdirSync(CACHE_DIR, { recursive: true })
+  for (const id of [victim, keeper]) {
+    writeFileSync(cachePath(id), JSON.stringify({ version: 1, record: { rows: {} } }))
   }
 }
 
@@ -125,6 +136,12 @@ try {
   check('A10 keeper log directory survived', existsSync(join(SESSIONS, keeper)), true)
   check('A11 orphan attachment GCd', existsSync(objectPath(ORPHAN)), false)
   check('A12 attachment still shared by the keeper is kept', existsSync(objectPath(SHARED)), true)
+  // The projection-cache row is what the listing's projection column is served
+  // from: leaving it behind keeps a deleted session listed, and with the
+  // archive bit already cleared it shows up as an ordinary conversation.
+  check('A12a victim projection-cache row removed', existsSync(cachePath(victim)), false)
+  check('A12b keeper projection-cache row survived', existsSync(cachePath(keeper)), true)
+  check('A12c delete reports the removed cache row', deleted.body.removedCache, cachePath(victim))
 
   const after = await getJson(`${host.base}/__dsh-archived-sessions/list`)
   check('A13 /list no longer carries the victim',
