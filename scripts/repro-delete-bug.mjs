@@ -12,7 +12,8 @@
 import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-const BASE = 'http://127.0.0.1:4675'
+const PORT = process.env.DSH_PROBE_PORT ?? '1694'
+const BASE = `http://127.0.0.1:${PORT}`
 const HOME = 'C:\\Users\\jing\\.dsh'
 const SEG = '--D-Program~0020Files~0020~0028x86~0029-deepseek-harness--'
 const ID = `session-repro-${Date.now().toString(16)}`

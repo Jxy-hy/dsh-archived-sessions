@@ -228,15 +228,43 @@ export class ArchivedSessionsController {
         '/__dsh-archived-sessions/delete', { sessionId: target.id })
       if (!result.ok) throw new Error(result.message ?? result.error ?? 'delete failed')
       this.hooks.set({ ...this.hooks.getSnapshot(), deleting: false, pendingDelete: null })
-      await this.load()
-      // The deleted cold session cannot have fired a session-removed frame,
-      // so re-pull the Host session list to drop its stale Ungrouped row.
-      await this.connection.refreshSessionList()
     } catch (error) {
       this.hooks.set({
         ...this.hooks.getSnapshot(),
         deleting: false,
         deleteError: error instanceof Error ? error.message : String(error),
+      })
+      return
+    }
+    // The delete itself succeeded; the row is gone from disk. Both refreshes
+    // below are cleanup of the in-memory views and must not be able to undo
+    // that result, so each runs in its own guarded step:
+    //
+    // 1. Re-pull the Host session list. A deleted cold (persisted, not-open)
+    //    session never fires `session/disposed`, so nothing else removes it
+    //    from the client's list baseline: without this it reappears in the
+    //    sidebar as an ordinary unarchived row, which is exactly the reported
+    //    symptom ("deleted from the archive list, then shows up in the
+    //    sidebar"). This one is the load-bearing refresh, so it runs FIRST and
+    //    its failure is surfaced rather than swallowed.
+    try {
+      await this.connection.refreshSessionList()
+    } catch (error) {
+      this.hooks.set({
+        ...this.hooks.getSnapshot(),
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+    // 2. Re-read this page's own rows. Previously this ran before the list
+    //    refresh and shared its try block, so a failure here skipped the
+    //    sidebar refresh entirely — the delete looked successful (the host had
+    //    already removed the files) while the row stayed on screen.
+    try {
+      await this.load()
+    } catch (error) {
+      this.hooks.set({
+        ...this.hooks.getSnapshot(),
+        error: error instanceof Error ? error.message : String(error),
       })
     }
   }
