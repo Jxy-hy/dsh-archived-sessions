@@ -23,6 +23,11 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { zstdDecompressSync } from 'node:zlib'
 import type { Context } from '@deepseek-ai/cordis'
+// Type-only: pulls the `api-session/removed` event declaration. The core emits
+// that event only from its `session/disposed` handler, so a deleted COLD
+// session — the only kind this plugin deletes — never produces one; the plugin
+// has to emit it itself or the browser never learns the row is gone.
+import type {} from '@deepseek-ai/dsh-api-session-controller'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 // Type-only: pulls the ctx.sessions merge (the live SessionStore).
 import type {} from '@deepseek-ai/dsh-session'
@@ -335,6 +340,20 @@ async function handleDelete(ctx: Context, sessionId: string): Promise<unknown> {
     }
   }
   await (registry as { unarchiveSession: (id: string) => Promise<void> }).unarchiveSession(sessionId)
+
+  // 4) Tell every connected browser the Session left the Host registry. This is
+  // the same event the core emits from its own `session/disposed` handler, and
+  // it is the ONLY thing that removes a row from the sidebar without a full
+  // list re-pull. It has to come from here because a cold (stored, never
+  // opened) Session — precisely what this page lists, since opening an archived
+  // Session is refused — never fires `session/disposed`. Emitting is idempotent
+  // on the client (the removal mutation de-duplicates), so doing it also for a
+  // Session we just disposed is harmless.
+  ctx.emit('api-session/removed', sessionId as never)
+
+  // 5) Report whether the Host index still lists it, so a build that cannot
+  // prune the row tells the user to restart instead of leaving a silent ghost.
+  const stillListed = await hostStillLists(ctx, sessionId)
   return {
     ok: true,
     disposed,
@@ -342,6 +361,28 @@ async function handleDelete(ctx: Context, sessionId: string): Promise<unknown> {
     removedCache,
     removedAttachments,
     accounting: 'unarchiveSession',
+    stillListed,
+  }
+}
+
+/**
+ * Whether the Host session listing still returns this id after the delete.
+ * Best-effort: the persistence listing is advisory, so an unreadable listing
+ * reports `undefined` rather than failing the deletion.
+ * @param ctx - plugin context carrying the persistence service.
+ * @param sessionId - the just-deleted session.
+ * @returns true when still listed, false when gone, undefined when unknown.
+ */
+async function hostStillLists(ctx: Context, sessionId: string): Promise<boolean | undefined> {
+  try {
+    const listed = await ctx.sessionPersistence.list() as unknown as readonly unknown[]
+    for (const entry of listed) {
+      const id = (entry as { id?: unknown } | null)?.id
+      if (id === sessionId) return true
+    }
+    return false
+  } catch {
+    return undefined
   }
 }
 

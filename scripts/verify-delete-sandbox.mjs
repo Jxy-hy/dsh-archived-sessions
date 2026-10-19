@@ -78,12 +78,15 @@ function check(label, actual, expected) {
 async function boot(registry) {
   const mod = await import('../lib/index.js')
   let route
+  /** Host events the plugin emitted; the browser prunes rows from these. */
+  const emitted = []
   const ctx = {
     effect: (fn) => fn(),
     webServer: { register: (r) => { route = r; return () => {} } },
     workspaceRegistry: registry,
     sessionPersistence: { list: async () => [] },
     sessions: { get: () => undefined, dispose: () => true },
+    emit: (name, ...args) => { emitted.push([name, ...args]) },
     logger: { warn: () => {} },
   }
   mod.apply(ctx)
@@ -92,6 +95,7 @@ async function boot(registry) {
   const base = `http://127.0.0.1:${server.address().port}`
   return {
     base,
+    emitted,
     close: () => new Promise(resolve => server.close(resolve)),
   }
 }
@@ -142,6 +146,15 @@ try {
   check('A12a victim projection-cache row removed', existsSync(cachePath(victim)), false)
   check('A12b keeper projection-cache row survived', existsSync(cachePath(keeper)), true)
   check('A12c delete reports the removed cache row', deleted.body.removedCache, cachePath(victim))
+
+  // The sidebar prunes a row only from the forwarded `api-session/removed`
+  // event: the core emits it solely from its `session/disposed` handler, which a
+  // cold (never-opened) session — everything this page lists — never fires. If
+  // the plugin does not emit it, the row survives in the sidebar until something
+  // else re-pulls the whole list.
+  check('A12d delete forwards api-session/removed for the victim',
+    host.emitted.filter(([name]) => name === 'api-session/removed'), [['api-session/removed', victim]])
+  check('A12e delete reports the Host listing state', deleted.body.stillListed, false)
 
   const after = await getJson(`${host.base}/__dsh-archived-sessions/list`)
   check('A13 /list no longer carries the victim',

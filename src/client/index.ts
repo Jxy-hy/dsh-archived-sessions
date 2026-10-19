@@ -42,10 +42,35 @@ export function apply(ctx: ClientContext): void {
   // controller keeps the plural `sessions` face name for its listing role.
   const remote = ctx.get('remote') as unknown as { session: ArchivedSessionsConnection['sessions'] }
   const workspaces = ctx.get('workspaces') as unknown as ArchivedSessionsConnection['workspaces']
+
+  // Re-pull the Host session-list baseline. The core emits `api-session/removed`
+  // only from its `session/disposed` handler, so a deleted COLD session (stored,
+  // never opened) produces no removal event at all — this pull is the only thing
+  // that prunes its row from the sidebar. Resolve it defensively: if the service
+  // face is missing the refresh must degrade to a reported no-op rather than
+  // throw, because a throw here used to abort the whole post-delete cleanup and
+  // leave the row on screen.
+  const refreshSessionList = async (): Promise<void> => {
+    const refresh = (sessions as unknown as { refresh?: () => unknown } | undefined)?.refresh
+    if (typeof refresh !== 'function') {
+      throw new Error('session-list refresh is unavailable in this harness build')
+    }
+    await refresh.call(sessions)
+  }
+
   const connection: ArchivedSessionsConnection = {
     sessions: remote.session,
     workspaces,
-    refreshSessionList: () => sessions.refresh(),
+    refreshSessionList,
+    // The sidebar renders from this list; asking it directly is the only
+    // reliable way to know whether a deleted row is really off screen.
+    isSessionListed: (id: string): boolean => {
+      const list = (sessions as unknown as {
+        list?: { getSnapshot?: () => { byId?: Record<string, unknown> } }
+      }).list
+      const snapshot = list?.getSnapshot?.()
+      return snapshot?.byId?.[id] !== undefined
+    },
   }
   const section = new ArchivedSessionsController(connection)
 

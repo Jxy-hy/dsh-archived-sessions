@@ -31,13 +31,19 @@ export interface ArchivedSessionsConnection {
     list: { getSnapshot(): { archivedSessionIds: readonly string[] } }
   }
   /**
-   * Re-pull the Host session-list baseline after a delete. Deleting a cold
-   * (persisted, not-open) session never fires `session/disposed`, so the
-   * browser never receives `host/session-removed` for it; dropping it from
-   * the archive set merely un-hides the stale row as Ungrouped. Refreshing
-   * prunes rows absent from the fresh baseline.
+   * Re-pull the Host session-list baseline after a delete. The core forwards
+   * `api-session/removed` only from its `session/disposed` handler, so the
+   * plugin emits that event itself for a deleted cold session; this pull is the
+   * reconciliation that follows it.
    */
   refreshSessionList: () => Promise<void>
+  /**
+   * Whether the browser's own session list still carries this id — the exact
+   * data the sidebar renders from. Checked after the refresh so a row that
+   * survived both the forwarded removal and a full re-pull is reported instead
+   * of being silently left behind.
+   */
+  isSessionListed: (id: string) => boolean
 }
 
 /** One archived-session row the page renders. */
@@ -70,6 +76,11 @@ export interface ArchivedSessionsState {
   deleting: boolean
   /** The last delete failure, cleared by the next dialog action. */
   deleteError: string | null
+  /**
+   * Set when a delete succeeded but the Host still listed the session, so the
+   * sidebar may keep showing a row whose files are already gone.
+   */
+  deleteStillListed: boolean
 }
 
 const INITIAL: ArchivedSessionsState = {
@@ -80,6 +91,7 @@ const INITIAL: ArchivedSessionsState = {
   pendingDelete: null,
   deleting: false,
   deleteError: null,
+  deleteStillListed: false,
 }
 
 /** Wire row of `session.list` (titles/update times). The durable title rides
@@ -215,7 +227,13 @@ export class ArchivedSessionsController {
   }
 
   confirmDelete(row: ArchivedRow | null): void {
-    this.hooks.set({ ...this.hooks.getSnapshot(), pendingDelete: row, deleteError: null })
+    this.hooks.set({
+      ...this.hooks.getSnapshot(),
+      pendingDelete: row,
+      deleteError: null,
+      // A new dialog supersedes the previous delete's outcome note.
+      deleteStillListed: false,
+    })
   }
 
   async remove(): Promise<void> {
@@ -236,17 +254,15 @@ export class ArchivedSessionsController {
       })
       return
     }
-    // The delete itself succeeded; the row is gone from disk. Both refreshes
-    // below are cleanup of the in-memory views and must not be able to undo
-    // that result, so each runs in its own guarded step:
+    // The delete succeeded: the row's files are gone. What remains is making the
+    // browser agree. Order matters, and each step is guarded so one failure can
+    // never skip the next.
     //
-    // 1. Re-pull the Host session list. A deleted cold (persisted, not-open)
-    //    session never fires `session/disposed`, so nothing else removes it
-    //    from the client's list baseline: without this it reappears in the
-    //    sidebar as an ordinary unarchived row, which is exactly the reported
-    //    symptom ("deleted from the archive list, then shows up in the
-    //    sidebar"). This one is the load-bearing refresh, so it runs FIRST and
-    //    its failure is surfaced rather than swallowed.
+    // 1. Re-pull the Host session list. The Host forwarded
+    //    `api-session/removed` during the delete (the plugin emits it, because
+    //    the core only emits it for a `session/disposed` that a cold session
+    //    never produces), so the sidebar has usually already dropped the row.
+    //    This pull reconciles anything else that drifted.
     try {
       await this.connection.refreshSessionList()
     } catch (error) {
@@ -256,15 +272,25 @@ export class ArchivedSessionsController {
       })
     }
     // 2. Re-read this page's own rows. Previously this ran before the list
-    //    refresh and shared its try block, so a failure here skipped the
-    //    sidebar refresh entirely — the delete looked successful (the host had
-    //    already removed the files) while the row stayed on screen.
+    //    refresh in the same try block, so a failure here skipped the sidebar
+    //    refresh entirely — the delete looked successful while the row stayed.
     try {
       await this.load()
     } catch (error) {
       this.hooks.set({
         ...this.hooks.getSnapshot(),
         error: error instanceof Error ? error.message : String(error),
+      })
+    }
+    // 3. Ask the exact surface the sidebar renders from whether the row is
+    //    really gone. This is the only check that answers the user's question
+    //    directly, and it does not guess from Host state: if the browser list
+    //    still carries the id after both the removal event and a re-pull, the
+    //    row survives on screen and the view says so.
+    if (this.connection.isSessionListed(target.id)) {
+      this.hooks.set({
+        ...this.hooks.getSnapshot(),
+        deleteStillListed: true,
       })
     }
   }

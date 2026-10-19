@@ -1,7 +1,7 @@
 {
   "name": "dsh-archived-sessions",
-  "version": "0.1.4",
-  "description": "DSH web plugin: manage archived sessions from the Settings page 閳?unarchive to restore a session, or permanently delete it (log and related attachments) behind a confirmation dialog.",
+  "version": "0.1.5",
+  "description": "DSH web plugin: manage archived sessions from the Settings page 闁?unarchive to restore a session, or permanently delete it (log and related attachments) behind a confirmation dialog.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

@@ -77,6 +77,13 @@ export function ArchivedSessionsSection(props: ArchivedSessionsSectionProps): Re
         <p className={css.status} aria-live="polite">{t('loading')}</p>
       )}
 
+      {/* The delete succeeded on disk but this harness build still returns the
+          session from its listing, so the sidebar keeps a row with nothing
+          behind it. Say so instead of leaving the user with a mystery. */}
+      {state.deleteStillListed && (
+        <p className={css.error} role="alert">{t('deleteStillListed')}</p>
+      )}
+
       {state.status === 'error' && (
         <div className={css.status}>
           <p className={css.error} role="alert">{t('loadFailed', { error: state.error ?? '' })}</p>
