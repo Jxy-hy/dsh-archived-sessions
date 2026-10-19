@@ -94,6 +94,21 @@ const INITIAL: ArchivedSessionsState = {
   deleteStillListed: false,
 }
 
+/**
+ * How many times to re-pull the session list before declaring a deleted row
+ * still on screen. Two is normally enough: the first pull may have been the
+ * single-flight partner of one that started before the delete, the second reads
+ * the post-delete baseline. One extra absorbs an unlucky interleaving.
+ */
+const LIST_CONVERGE_ATTEMPTS = 3
+/** Pause between convergence pulls; long enough for a Host round trip. */
+const LIST_CONVERGE_DELAY_MS = 200
+
+/** Promise-based sleep used to space convergence attempts. */
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => { setTimeout(resolve, ms) })
+}
+
 /** Wire row of `session.list` (titles/update times). The durable title rides
  * the projection block's `values.title` key — the same source the sidebar
  * names sessions from — never a top-level field. */
@@ -271,7 +286,7 @@ export class ArchivedSessionsController {
         error: error instanceof Error ? error.message : String(error),
       })
     }
-    // 2. Re-read this page's own rows. Previously this ran before the list
+    // 3. Re-read this page's own rows. Previously this ran before the list
     //    refresh in the same try block, so a failure here skipped the sidebar
     //    refresh entirely — the delete looked successful while the row stayed.
     try {
@@ -282,15 +297,31 @@ export class ArchivedSessionsController {
         error: error instanceof Error ? error.message : String(error),
       })
     }
-    // 3. Ask the exact surface the sidebar renders from whether the row is
-    //    really gone. This is the only check that answers the user's question
-    //    directly, and it does not guess from Host state: if the browser list
-    //    still carries the id after both the removal event and a re-pull, the
-    //    row survives on screen and the view says so.
+    // 4. Converge the sidebar. `refreshSessionList` is single-flight: a call
+    //    made while another list pull is already in flight resolves with THAT
+    //    pull, whose payload predates the delete, and the removed row comes
+    //    straight back. Retry a bounded number of times with a pause so a raced
+    //    pull is followed by a fresh one that reads the post-delete baseline.
+    //    A failed pull does not end the loop — the next attempt may succeed, and
+    //    giving up early is what leaves the row behind. Only a row that survives
+    //    every attempt is reported.
+    let refreshFailure: string | null = null
+    for (let attempt = 0; attempt < LIST_CONVERGE_ATTEMPTS; attempt++) {
+      if (!this.connection.isSessionListed(target.id)) {
+        return
+      }
+      if (attempt > 0) await delay(LIST_CONVERGE_DELAY_MS)
+      try {
+        await this.connection.refreshSessionList()
+      } catch (error) {
+        refreshFailure = error instanceof Error ? error.message : String(error)
+      }
+    }
     if (this.connection.isSessionListed(target.id)) {
       this.hooks.set({
         ...this.hooks.getSnapshot(),
         deleteStillListed: true,
+        ...(refreshFailure === null ? {} : { error: refreshFailure }),
       })
     }
   }

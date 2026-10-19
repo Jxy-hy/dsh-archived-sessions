@@ -1,7 +1,7 @@
 {
   "name": "dsh-archived-sessions",
-  "version": "0.1.5",
-  "description": "DSH web plugin: manage archived sessions from the Settings page 闁?unarchive to restore a session, or permanently delete it (log and related attachments) behind a confirmation dialog.",
+  "version": "0.1.6",
+  "description": "DSH web plugin: manage archived sessions from the Settings page 闂?unarchive to restore a session, or permanently delete it (log and related attachments) behind a confirmation dialog.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -88,6 +88,7 @@
     "watch": "tsdown --watch",
     "verify:delete": "node scripts/verify-delete-sandbox.mjs",
     "verify:client": "node scripts/verify-client-render.mjs",
-    "verify": "npm run verify:delete && npm run verify:client"
+    "verify:converge": "node scripts/verify-client-delete.mjs",
+    "verify": "npm run verify:delete && npm run verify:client && npm run verify:converge"
   }
 }

@@ -84,6 +84,13 @@ export function ArchivedSessionsSection(props: ArchivedSessionsSectionProps): Re
         <p className={css.error} role="alert">{t('deleteStillListed')}</p>
       )}
 
+      {/* A post-action failure (the sidebar refresh, say) keeps the page in the
+          ready state. Rendering it here is what makes such a failure visible
+          instead of silently leaving the row on screen. */}
+      {state.status !== 'error' && state.error !== null && !state.deleteStillListed && (
+        <p className={css.error} role="alert">{t('actionFailed', { error: state.error })}</p>
+      )}
+
       {state.status === 'error' && (
         <div className={css.status}>
           <p className={css.error} role="alert">{t('loadFailed', { error: state.error ?? '' })}</p>
